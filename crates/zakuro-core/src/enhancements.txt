@@ -30,6 +30,10 @@ D3000000 08000000
 2020A748 0000003C
 D2000000 00000000
 
+= 00040000000E5C00 Shin Megami Tensei IV (USA)
+60 FPS | rev0 | lucky | The whole game runs twice as fast with it.
+204E3BA0 00000000
+
 = 000400000011C400 Pokémon Omega Ruby (USA)
 60 FPS | rev3 | Reshiban | The whole game runs twice as fast with it.
 28C650C1 00000000
