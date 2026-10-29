@@ -37,11 +37,35 @@ use present::Backend;
 use recompile::{Job, Stage, Toolchain};
 use settings::{CameraSource, Renderer, Screens, Settings};
 
+pub use zakuro_core::memory::Memory;
 pub use zakuro_core::recompiled::Linked;
+
+/// what a program built on Zakuro shows over its game, worked out from the
+/// game's memory: a line kept in a corner, and a notice shown for a moment.
+/// a recompiled game can show what the game keeps hidden this way, its
+/// alignment, a timer, without drawing into the game's own screens.
+pub trait GameOverlay {
+    /// called after each frame the game runs, with its memory.
+    fn frame(&mut self, memory: &mut Memory) -> OverlayText;
+}
+
+/// what a GameOverlay shows after a frame.
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+pub struct OverlayText {
+    /// a line in the bottom right corner while it is some.
+    pub corner: Option<String>,
+    /// a notice at the top for a moment, as a saved state's.
+    pub notice: Option<String>,
+}
 
 /// runs the emulator as the command line says, on recompiled code linked
 /// into the program when there is some.
 pub fn run(linked: Option<Linked>) {
+    run_with(linked, None)
+}
+
+/// runs the emulator as run does, with an overlay over the game.
+pub fn run_with(linked: Option<Linked>, overlay: Option<Box<dyn GameOverlay>>) {
     report::init();
 
     let options = match cli::parse() {
@@ -77,6 +101,8 @@ pub fn run(linked: Option<Linked>) {
         options,
         settings,
         linked,
+        overlay,
+        overlay_corner: None,
         library: Library::new(data_dir.clone()),
         data_dir,
         game: None,
@@ -341,6 +367,10 @@ struct App {
     options: cli::Options,
     settings: Settings,
     linked: Option<Linked>,
+    /// what the program built on Zakuro shows over the game, and the line it
+    /// keeps in the corner now.
+    overlay: Option<Box<dyn GameOverlay>>,
+    overlay_corner: Option<String>,
     data_dir: Option<PathBuf>,
     game: Option<Running>,
     library: Library,
@@ -700,6 +730,7 @@ impl App {
 
     fn back_to_library(&mut self) {
         self.game = None;
+        self.overlay_corner = None;
         if let Some(room) = &self.room {
             room.playing("");
         }
@@ -1281,6 +1312,13 @@ impl App {
         }
         game.system.set_input(input);
         let outcome = game.system.run_frame();
+        if let Some(overlay) = &mut self.overlay {
+            let text = overlay.frame(&mut game.system.memory);
+            self.overlay_corner = text.corner;
+            if let Some(notice) = text.notice {
+                self.menus.toast = Some((notice, Instant::now()));
+            }
+        }
         game.count_frame();
         let sound = game.system.take_audio();
         // fast forward plays no sound, there is too much of it too soon
@@ -1517,12 +1555,16 @@ impl App {
         let cheats = self.game.as_ref().filter(|_| self.menus.cheats_open).map(|game| {
             game.system.cheats.iter().map(|cheat| (cheat.name.clone(), cheat.enabled, cheat.notes.join("\n"), cheat.builtin)).collect::<Vec<_>>()
         });
+        let corner = self.overlay_corner.clone().filter(|_| game.is_some());
         let (menus, library, settings, jobs) = (&mut self.menus, &self.library, &mut self.settings, &self.jobs);
         let mut actions = Vec::new();
         let overlay = gui.frame(window, |ui| {
             match &game {
                 Some((name, fps, recompiled)) => {
-                    actions.extend(menus.game(ui, name, show_fps.then_some(*fps), *recompiled, fast, jobs, saved.as_deref()))
+                    actions.extend(menus.game(ui, name, show_fps.then_some(*fps), *recompiled, fast, jobs, saved.as_deref()));
+                    if let Some(text) = &corner {
+                        menus::corner(ui.ctx(), text);
+                    }
                 }
                 None => actions.extend(menus.library(ui, library, settings, jobs)),
             }
